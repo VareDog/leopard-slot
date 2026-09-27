@@ -62,7 +62,7 @@ KS=build/release.keystore
 if [ ! -f "$KS" ]; then
   keytool -genkeypair -keystore "$KS" -alias dosdog -keyalg RSA -keysize 2048 \
     -validity 10000 -storepass dosdog123 -keypass dosdog123 \
-    -dname "CN=DosDog" -batch
+    -dname "CN=DosDog"
 fi
 
 echo "[6/6] sign"
