@@ -210,13 +210,42 @@ const chipVals = [1,5,10,50,100];
 /* ================== 状态 ================== */
 let credit = 1000, winPool = 0, jackpot = 3000, banked = 0;
 let bets = {}, chip = 10, state = 'BET', muted = false;
-let lit = 0, winIdx = -1, flashT = 0, spinT0 = 0, spinDur = 0, spinSteps = 0, spinFrom = 0, spinTarget = 0, lastTickIdx = -1;
+let lit = 0, winIdx = -1, flashT0 = 0, spinT0 = 0, spinDur = 0, spinSteps = 0, spinFrom = 0, spinTarget = 0, lastTickIdx = -1;
 let coins = [], spins = 0, maxWin = 0;
 let firstRun = localStorage.getItem('ls_first') !== '1';
 
 /* ================== 存取档 ================== */
-function save(){ try{ localStorage.setItem('ls_save', JSON.stringify({credit,winPool,jackpot,banked,spins,maxWin,muted})); }catch(e){} }
-function load(){ try{ const s = JSON.parse(localStorage.getItem('ls_save')||'null'); if(s){ credit=s.credit; winPool=s.winPool||0; jackpot=s.jackpot||3000; banked=s.banked||0; spins=s.spins||0; maxWin=s.maxWin||0; muted=!!s.muted; } }catch(e){} }
+function save(){
+  try{
+    localStorage.setItem('ls_save', JSON.stringify({
+      credit, winPool, jackpot, banked, spins, maxWin, muted,
+      cheat: { mode: cheat.mode, p: cheat.p, pick: cheat.pick, dice: cheat.dice }
+    }));
+  }catch(e){}
+}
+function load(){
+  try{
+    const s = JSON.parse(localStorage.getItem('ls_save')||'null');
+    if(!s) return;
+    credit=s.credit; winPool=s.winPool||0; jackpot=s.jackpot||3000; banked=s.banked||0; spins=s.spins||0; maxWin=s.maxWin||0; muted=!!s.muted;
+    if(s.cheat){
+      if(s.cheat.mode === 'off' || s.cheat.mode === 'player' || s.cheat.mode === 'house') cheat.mode = s.cheat.mode;
+      if(typeof s.cheat.p === 'number') cheat.p = Math.max(0, Math.min(1, s.cheat.p));
+      if(s.cheat.pick === 'uniform' || s.cheat.pick === 'weighted') cheat.pick = s.cheat.pick;
+      cheat.dice = !!s.cheat.dice;
+    }
+  }catch(e){}
+}
+function syncCheatUI(){
+  const modeEl = document.querySelector('input[name="cmode"][value="'+cheat.mode+'"]');
+  if(modeEl) modeEl.checked = true;
+  const pickEl = document.querySelector('input[name="cpick"][value="'+cheat.pick+'"]');
+  if(pickEl) pickEl.checked = true;
+  const pct = document.getElementById('cpPct');
+  pct.value = Math.round(cheat.p * 100);
+  document.getElementById('cpPctV').textContent = pct.value + '%';
+  document.getElementById('cdice').checked = cheat.dice;
+}
 
 /* ================== 音效（WebAudio） ================== */
 let AC = null;
@@ -299,13 +328,18 @@ function draw(now){
   /* 中央提示文字 */
   ctx.fillStyle = '#0d47a1'; ctx.font = 'bold '+(S*0.038)+'px sans-serif';
   const hint = state==='BET' ? '请押注后按开始' : state==='SPIN' ? '转动中…' :
-               state==='RESULT' ? (winPool>0 ? '恭喜中奖！' : '很遗憾…') : '猜大小';
+               state==='STOP' ? '停！' : state==='MISS' ? '停在这里' :
+               state==='RESULT' ? '恭喜中奖！' : '猜大小';
   ctx.fillText(hint, S/2, S - in0 - S*0.05);
-  /* 押中闪烁光圈 */
-  if(state==='RESULT' && winPool>0 && winIdx>=0){
-    flashT += 0.08; const on = Math.floor(flashT)%2===0;
-    if(on){ const p = cellXY(winIdx);
-      ctx.fillStyle='rgba(255,255,0,.35)'; roundRect(p.x-p.cs*.52,p.y-p.cs*.52,p.cs*1.04,p.cs*1.04,p.cs*.2); ctx.fill(); }
+  /* 停格高亮光圈：停下先稳住，再闪，关灯时仍留橙边，避免看成前一格 */
+  const stopStates = state==='STOP' || state==='RESULT' || state==='MISS';
+  const flashOn = state==='STOP' || (stopStates && Math.floor((now - flashT0)/260)%2===0);
+  if(stopStates && winIdx>=0){
+    const p = cellXY(winIdx);
+    ctx.fillStyle = flashOn ? 'rgba(255,235,59,.45)' : 'rgba(255,152,0,.22)';
+    roundRect(p.x-p.cs*.55,p.y-p.cs*.55,p.cs*1.1,p.cs*1.1,p.cs*.22); ctx.fill();
+    ctx.strokeStyle = '#ffea00'; ctx.lineWidth = flashOn ? 5 : 3;
+    roundRect(p.x-p.cs*.52,p.y-p.cs*.52,p.cs*1.04,p.cs*1.04,p.cs*.2); ctx.stroke();
   }
   /* 金币粒子 */
   for(let i=coins.length-1;i>=0;i--){
@@ -317,19 +351,21 @@ function draw(now){
   /* 24 格 */
   for(let i=0;i<N;i++){
     const p = cellXY(i), k = RING[i];
-    const litNow = (state==='SPIN' && i===lit) || (state==='RESULT' && winPool>0 && i===winIdx && Math.floor(flashT)%2===0);
-    ctx.fillStyle = litNow ? '#ffea00' : '#12224a';
+    const marked = stopStates && i===winIdx;
+    const litNow = (state==='SPIN' && i===lit) || (marked && flashOn);
+    ctx.fillStyle = litNow ? '#ffea00' : (marked ? '#3a2a00' : '#12224a');
     roundRect(p.x-p.cs*.46, p.y-p.cs*.46, p.cs*.92, p.cs*.92, p.cs*.16); ctx.fill();
-    ctx.strokeStyle = litNow ? '#ff6d00' : SYM[k].c; ctx.lineWidth = litNow ? 3 : 1.4; ctx.stroke();
+    ctx.strokeStyle = litNow ? '#ff6d00' : (marked ? '#ffab00' : SYM[k].c);
+    ctx.lineWidth = (litNow || marked) ? 3.5 : 1.4; ctx.stroke();
     drawSym(k, p.x, p.y - p.cs*0.06, p.cs*0.42);
     ctx.fillStyle = litNow ? '#bf360c' : '#ffd740'; ctx.font = 'bold '+(p.cs*0.2)+'px sans-serif';
     ctx.fillText('×'+SYM[k].odds, p.x, p.y + p.cs*0.3);
     /* LED 灯珠（不用 shadowBlur，部分 Android WebView 会闪屏） */
     const ledX = Math.abs(p.x-S/2) > Math.abs(p.y-S/2) ? (p.x<S/2 ? p.x-p.cs*0.52 : p.x+p.cs*0.52) : p.x;
     const ledY = Math.abs(p.x-S/2) > Math.abs(p.y-S/2) ? p.y : (p.y<S/2 ? p.y-p.cs*0.52 : p.y+p.cs*0.52);
-    if(litNow){ ctx.beginPath(); ctx.arc(ledX, ledY, p.cs*0.13, 0, 7); ctx.fillStyle = 'rgba(255,23,68,.4)'; ctx.fill(); }
+    if(litNow || marked){ ctx.beginPath(); ctx.arc(ledX, ledY, p.cs*0.13, 0, 7); ctx.fillStyle = 'rgba(255,23,68,.4)'; ctx.fill(); }
     ctx.beginPath(); ctx.arc(ledX, ledY, p.cs*0.07, 0, 7);
-    ctx.fillStyle = litNow ? '#fff' : '#5c0f0f';
+    ctx.fillStyle = litNow ? '#fff' : (marked ? '#ffab00' : '#5c0f0f');
     ctx.fill();
   }
 }
@@ -433,33 +469,38 @@ function refreshUI(){
 function closeHelp(){ document.getElementById('helpMask').style.display='none'; localStorage.setItem('ls_first','1'); }
 
 /* ================== 隐藏选项 ================== */
-const cheat = { mode:'off', p:0.8, pick:'weighted', dice:false };   // 不入存档，每次启动默认关
-function pickTarget(){
-  if(cheat.mode === 'off') return Math.floor(Math.random()*N);      // 纯随机
-  let total = 0; for(const k in bets) total += bets[k];
-  if(total <= 0) return Math.floor(Math.random()*N);
-  const winL = [], loseL = [];
-  for(let i=0;i<N;i++){
-    const k = RING[i];
-    let net = (bets[k] ? bets[k]*SYM[k].odds : 0) - total;          // 落在这格的净盈亏
-    if(k === 'leopard' && bets[k]) net += jackpot;                  // 雪豹额外爆池
-    (net > 0 ? winL : loseL).push(i);                               // ① 净赚才算赢类
-  }
-  const wantWin = cheat.mode === 'player' ? Math.random() < cheat.p : Math.random() >= cheat.p;
-  const list = wantWin ? winL : loseL;
-  if(!list.length) return Math.floor(Math.random()*N);              // ② 类别为空退化纯随机
-  if(wantWin && cheat.pick === 'weighted'){
-    let sum = 0; const ws = list.map(i => {
-      const k = RING[i];
-      let w = bets[k]*SYM[k].odds; if(k === 'leopard') w += jackpot;
+const cheat = { mode:'off', p:0.8, pick:'weighted', dice:false };
+function pickHitCell(hit){
+  const keys = [];
+  hit.forEach(i => { if(!keys.includes(RING[i])) keys.push(RING[i]); });
+  let chosen = keys[Math.floor(Math.random()*keys.length)];
+  if(cheat.pick === 'weighted'){
+    let sum = 0;
+    const ws = keys.map(k => {
+      let w = (bets[k]||0)*SYM[k].odds;
+      if(k === 'leopard') w += jackpot;
       sum += w; return w;
     });
-    if(sum <= 0) return list[Math.floor(Math.random()*list.length)];
-    let x = Math.random()*sum;
-    for(let j=0;j<list.length;j++){ x -= ws[j]; if(x < 0) return list[j]; }
-    return list[list.length-1];
+    if(sum > 0){
+      let x = Math.random()*sum;
+      chosen = keys[keys.length-1];
+      for(let j=0;j<keys.length;j++){ x -= ws[j]; if(x < 0){ chosen = keys[j]; break; } }
+    }
   }
-  return list[Math.floor(Math.random()*list.length)];
+  const cells = hit.filter(i => RING[i] === chosen);
+  return cells[Math.floor(Math.random()*cells.length)];
+}
+function pickTarget(){
+  if(cheat.mode === 'off') return Math.floor(Math.random()*N);
+  const hit = [], miss = [];
+  for(let i=0;i<N;i++) ((bets[RING[i]]||0) > 0 ? hit : miss).push(i);
+  const force = Math.random() < cheat.p;
+  if(cheat.mode === 'player'){
+    if(force && hit.length) return pickHitCell(hit);
+    return Math.floor(Math.random()*N);
+  }
+  if(force && miss.length) return miss[Math.floor(Math.random()*miss.length)];
+  return Math.floor(Math.random()*N);
 }
 let cheatTaps = [];
 document.querySelector('#topbar .led').addEventListener('click', ()=>{
@@ -474,6 +515,7 @@ function armCheatTimer(){
   cheatTimer = setTimeout(closeCheat, 3000);   // 无操作 3 秒自动收起
 }
 function openCheat(){
+  syncCheatUI();
   document.getElementById('cheatMask').style.display='block';
   document.getElementById('cheatPanel').style.display='block';
   armCheatTimer();
@@ -487,19 +529,19 @@ document.getElementById('cheatMask').addEventListener('click', closeCheat);   //
 ['touchstart','click','input','change'].forEach(ev=>{
   document.getElementById('cheatPanel').addEventListener(ev, armCheatTimer, {passive:true});
 });
-document.querySelectorAll('input[name="cmode"]').forEach(r=>r.addEventListener('change', function(){ cheat.mode = this.value; }));
-document.querySelectorAll('input[name="cpick"]').forEach(r=>r.addEventListener('change', function(){ if(this.checked) cheat.pick = this.value; }));
-document.getElementById('cpPct').addEventListener('input', function(){ cheat.p = this.value/100; document.getElementById('cpPctV').textContent = this.value+'%'; });
-document.getElementById('cdice').addEventListener('change', function(){ cheat.dice = this.checked; });
+document.querySelectorAll('input[name="cmode"]').forEach(r=>r.addEventListener('change', function(){ cheat.mode = this.value; save(); }));
+document.querySelectorAll('input[name="cpick"]').forEach(r=>r.addEventListener('change', function(){ if(this.checked){ cheat.pick = this.value; save(); } }));
+document.getElementById('cpPct').addEventListener('input', function(){ cheat.p = this.value/100; document.getElementById('cpPctV').textContent = this.value+'%'; save(); });
+document.getElementById('cdice').addEventListener('change', function(){ cheat.dice = this.checked; save(); });
 document.getElementById('creset').addEventListener('click', ()=>{ localStorage.removeItem('ls_save'); localStorage.removeItem('ls_first'); location.reload(); });
 
 /* ================== 开局/跑灯 ================== */
 document.getElementById('startBtn').addEventListener('click', ()=>{
   if(state!=='BET' || !Object.values(bets).some(v=>v>0)) return;
   state = 'SPIN'; spins++; lit = 0; lastTickIdx = -1;
-  spinTarget = pickTarget();   // 隐藏模式控制倾向，关闭时为 24 格纯随机
+  spinTarget = pickTarget();
   spinFrom = 0;
-  spinSteps = N*3 + ((spinTarget - 0 + N) % N) + Math.floor(Math.random()*N);
+  spinSteps = N*(3 + Math.floor(Math.random()*2)) + ((spinTarget % N) + N) % N;
   spinDur = 2800 + Math.random()*1800;
   spinT0 = performance.now();
   refreshUI();
@@ -509,25 +551,39 @@ function stepSpin(now){
   const t = Math.min(1, (now - spinT0)/spinDur);
   const pos = Math.floor(spinSteps * easeOut(t)) % N;
   if(pos !== lastTickIdx){ lastTickIdx = pos; lit = pos; sTick(); if(navigator.vibrate && t>0.85) navigator.vibrate(10); }
-  if(t >= 1){ settle(lit); }
+  if(t >= 1 && state==='SPIN'){ lit = spinTarget; settle(lit); }
 }
 function settle(idx){
-  winIdx = idx; const k = RING[idx], b = bets[k]||0;
+  winIdx = idx; lit = idx;
+  const k = RING[idx], b = bets[k]||0;
   const gain = b * SYM[k].odds;
   let jpGain = 0;
   if(k==='leopard'){ jpGain = jackpot; jackpot = 3000; }
-  bets = {}; // 押注清掉（未中的已输）
-  if(gain + jpGain > 0){
-    state = 'RESULT'; winPool = gain + jpGain; flashT = 0;
-    maxWin = Math.max(maxWin, winPool);
-    for(let i=0;i<26;i++) coins.push({ x:S/2, y:S*0.4, vx:(Math.random()-.5)*9, vy:-Math.random()*10-3, vr:(Math.random()-.5)*.4, s:S*0.05 });
-    if(SYM[k].odds>=20 || jpGain>0) sBig(); else sWin();
-    if(navigator.vibrate) navigator.vibrate([80,60,80]);
-    setTimeout(showDouble, 900);
-  } else {
-    state = 'BET'; winIdx = -1; sLose();
-  }
+  bets = {};
+  state = 'STOP';
+  flashT0 = performance.now();
   refreshUI(); save();
+  const won = gain + jpGain > 0;
+  setTimeout(() => {
+    if(state !== 'STOP') return;
+    flashT0 = performance.now();
+    if(won){
+      state = 'RESULT'; winPool = gain + jpGain;
+      maxWin = Math.max(maxWin, winPool);
+      for(let i=0;i<26;i++) coins.push({ x:S/2, y:S*0.4, vx:(Math.random()-.5)*9, vy:-Math.random()*10-3, vr:(Math.random()-.5)*.4, s:S*0.05 });
+      if(SYM[k].odds>=20 || jpGain>0) sBig(); else sWin();
+      if(navigator.vibrate) navigator.vibrate([80,60,80]);
+      refreshUI(); save();
+      setTimeout(showDouble, 900);
+    } else {
+      state = 'MISS';
+      sLose();
+      refreshUI();
+      setTimeout(() => {
+        if(state==='MISS'){ state = 'BET'; winIdx = -1; refreshUI(); }
+      }, 1400);
+    }
+  }, 800);
 }
 
 /* ================== 猜大小 ================== */
@@ -599,6 +655,7 @@ function loop(now){
 
 /* ================== 启动 ================== */
 load();
+syncCheatUI();
 document.getElementById('muteBtn').textContent = muted ? '🔇' : '🔊';
 fit(); refreshUI();
 document.body.addEventListener('touchstart', ()=>{ const a=ac(); if(a && a.state==='suspended') a.resume(); }, {passive:true});

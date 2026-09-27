@@ -1,0 +1,43 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: yes | sdkmanager --install "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Build APK
+        run: bash scripts/build.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LeopardSlot
+          path: LeopardSlot.apk
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: 最新安装包
+          files: LeopardSlot.apk
+          body: |
+            金钱豹水果机 APK（个人娱乐，无真实货币）。
+            传到手机后允许「未知来源」安装。覆盖安装若提示签名不一致，先卸载再装。
+          make_latest: true

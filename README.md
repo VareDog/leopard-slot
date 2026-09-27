@@ -22,9 +22,14 @@
 
 ## 安装 APK
 
-1. 下载仓库根目录的 `LeopardSlot.apk` 传到手机
-2. 点开安装，允许「未知来源」即可（Android 5.0+）
-3. 或者直接用手机/电脑浏览器打开 `app/assets/index.html` 试玩
+推送到 `main` 后，GitHub Actions 会自动打包。
+
+1. 打开 [Releases](https://github.com/VareDog/leopard-slot/releases/tag/latest) 下载 `LeopardSlot.apk`
+2. 传到手机，允许「未知来源」安装（Android 5.0+）
+3. 也可在对应 [Actions 运行记录](https://github.com/VareDog/leopard-slot/actions) 里下载 Artifact
+4. 或者直接用浏览器打开 `app/assets/index.html` 试玩
+
+CI 每次用新的临时签名，覆盖安装若提示签名不一致，先卸载再装（本地存档会丢）。
 
 ## 项目结构
 
@@ -48,7 +53,7 @@ leopard-slot/
 3. [platform-34](https://dl.google.com/android/repository/platform-34-ext7_r03.zip) 解压到 `tools/android-34/`（取 `android.jar`）
 4. 运行 `build.bat`，产物为根目录 `LeopardSlot.apk`
 
-> 换机器重建后 keystore 会变化，无法覆盖安装旧版（会提示签名不一致，卸载重装即可，存档会丢）。想保留签名，请本地备份 `build/dosdog.keystore`。
+> 换机器或 CI 重建后 keystore 会变化，无法覆盖安装旧版（会提示签名不一致，卸载重装即可，存档会丢）。想保留签名，请本地备份 `build/dosdog.keystore`。
 
 ## 免责声明
 
